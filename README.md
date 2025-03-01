@@ -1,71 +1,51 @@
-# 音频处理与语音识别工具集
+# 下载网页音频并转为文本
 
-这个工具集提供了一套完整的音频处理解决方案，包括音频下载、云存储上传和语音识别功能。主要组件包括：
+基本可以免费用，主要用到了以下几个工具：
 
-- 音频下载工具 (基于yt-dlp)
-- 七牛云文件上传与链接生成工具
-- 阿里云语音识别工具 (基于DashScope API)
-- 一体化工作流处理工具
+- yt-dlp：下载音频
+- 七牛云：文件上传与链接生成工具
+- SenseVoice API：将音频转为文本
 
-## 目录
 
-- [安装](#安装)
-- [配置](#配置)
-- [音频下载](#音频下载)
-- [云存储上传](#云存储上传)
-- [语音识别](#语音识别)
-- [一体化工作流](#一体化工作流)
-- [完整工作流示例](#完整工作流示例)
-- [常见问题](#常见问题)
-- [API 服务](#api-服务)
+## 部署
+### 本地部署
 
-## 安装
-
-### 1. 克隆项目
+1. 克隆项目
 ```bash
-git clone <项目仓库地址>
-cd <项目目录>
+git clone https://github.com/henjicc/free_audio_to_text.git
+cd free_audio_to_text
 ```
-### 2. 安装依赖
-
+2. 安装依赖
 使用pip安装所需的依赖包：
 
 ```bash
 pip install -r requirements.txt
 ```
+### Docker部署
 
+#### 复制配置文件并填写必要信息
+```bash
+cp .env.example .env
+# 编辑.env文件，填写密钥信息，设置端口
+```
+
+#### 构建并启动容器
+```bash
+docker-compose up -d
+```
+
+#### 重新构建
+如果修改了代码或Dockerfile，需要重新构建镜像：
+
+```bash
+docker-compose build
+docker-compose up -d
+```
 ## 配置
-
-本工具使用环境变量进行配置，推荐使用.env文件管理敏感配置信息。
-
-### 基本配置步骤
 
 1. 复制 `.env.example` 文件为 `.env`
 2. 编辑 `.env` 文件，填写相关配置信息
 
-```
-# 七牛云配置
-QINIU_ACCESS_KEY=您的七牛云Access Key
-QINIU_SECRET_KEY=您的七牛云Secret Key
-QINIU_BUCKET_NAME=您的存储空间名称
-QINIU_BUCKET_DOMAIN=您的存储空间域名
-
-# 阿里云配置
-DASHSCOPE_API_KEY=您的阿里云DashScope API密钥
-
-# API服务配置(可选)
-API_HOST=0.0.0.0
-API_PORT=8000
-LOG_LEVEL=INFO
-```
-
-### 验证配置
-
-配置完成后，运行检查脚本确认环境变量是否正确设置：
-
-```bash
-python check_env.py
-```
 
 ## 音频下载
 
@@ -154,7 +134,7 @@ python aliyun_speech_recognition.py <音频文件URL> -v
 | `-o, --output` | 保存结果的JSON文件路径 (可选) |
 | `--keep-tags` | 保留情感和音频事件标记 (可选，默认去除) |
 
-## 一体化工作流
+## 一键搞定
 
 `main.py` 集成了下载、上传和识别三个步骤，提供一站式处理方案。
 
@@ -194,52 +174,6 @@ python main.py <URL> -l zh -v --cleanup -s result.json
 | `-s, --save` | 保存识别结果的JSON文件路径 (可选) |
 | `--cleanup` | 处理完成后自动清理临时文件和云端文件 (可选) |
 
-## 完整工作流示例
-
-下面是几种不同使用场景的示例：
-
-### 基础使用 - 处理YouTube视频
-```bash
-# 使用一体化工具
-python main.py "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -l en
-
-# 或者分步骤执行
-python download_audio.py "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-python qiniu_upload.py "downloads_temp/video_title.aac"
-python aliyun_speech_recognition.py "<七牛云URL>" -l en
-```
-
-### 处理中文播客
-```bash
-python main.py "https://example.com/podcast.mp3" -l zh -v -s result.json
-```
-
-### 分析情感内容
-```bash
-python main.py "https://example.com/interview.mp3" --keep-tags -l en
-```
-
-## 常见问题
-
-### 1. 上传到七牛云后无法访问文件
-
-确保您的七牛云存储空间设置正确。此工具生成的是带签名的私有链接，有效期默认为1小时。如需更长时间，请使用`-e`参数指定有效期（单位：秒）。
-
-### 2. 语音识别结果不准确
-
-尝试使用`-l`参数指定正确的语言。例如，对于中文音频，使用`-l zh`。某些方言或背景噪音较大的音频可能会影响识别准确率。
-
-### 3. 下载音频失败
-
-确保已安装最新版的yt-dlp，并且URL有效。某些网站可能限制下载，请确保您有权访问该内容。可以尝试添加`-v`参数查看详细错误信息。
-
-### 4. API密钥无效
-
-确保在`config.py`中正确填写了七牛云和阿里云的API密钥。您也可以通过命令行参数直接指定API密钥。
-
-### 5. 文件过大处理失败
-
-阿里云语音识别API对文件大小有限制（通常为2GB以内）。对于大型文件，可能需要先分割后再处理。
 
 ## API 服务
 
@@ -266,12 +200,11 @@ uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 
 | 端点 | 方法 | 描述 |
 |------|------|------|
-| `/` | GET | 返回 API 基本信息 |
+| `/text` | GET | 执行工作流并只返回纯文本结果 |
 | `/download` | POST | 下载音频文件 |
 | `/upload` | POST | 上传文件到七牛云 |
 | `/recognize` | POST | 识别音频文件内容 |
 | `/process` | POST | 执行完整工作流 |
-| `/text` | GET | 执行工作流并只返回纯文本结果 |
 
 ### API 使用示例
 
@@ -283,9 +216,8 @@ uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 curl -X GET "http://localhost:8000/text?url=https://example.com/abcd"
 ```
 
-#### 示例 2: 带 API 密钥的完整请求
+#### 示例 2: 一键搞定，同时设置参数
 
-完整的 cURL 示例，包含所有密钥和选项：
 
 ```bash
 curl -X POST "http://localhost:8000/process" \
@@ -296,12 +228,7 @@ curl -X POST "http://localhost:8000/process" \
     "keep_tags": false,
     "link_expires": 7200,
     "verbose": false,
-    "cleanup": true,
-    "qiniu_access_key": "您的七牛云AccessKey",
-    "qiniu_secret_key": "您的七牛云SecretKey",
-    "qiniu_bucket_name": "您的存储空间名称",
-    "qiniu_bucket_domain": "您的存储空间域名",
-    "aliyun_api_key": "您的阿里云API密钥"
+    "cleanup": true
   }'
 ```
 
@@ -323,8 +250,7 @@ curl -X POST "http://localhost:8000/recognize" \
   -H "Content-Type: application/json" \
   -d '{
     "file_url": "https://example.com/abcd",
-    "language": "en", 
-    "api_key": "您的阿里云API密钥",
+    "language": "auto", 
     "keep_tags": true
   }'
 ```
@@ -333,13 +259,3 @@ curl -X POST "http://localhost:8000/recognize" \
 
 - `/text` 端点直接返回纯文本
 - 其他端点返回 JSON 格式的详细结果
-
-### API 安全注意事项
-
-API 服务默认没有启用认证机制。在生产环境中部署时，建议：
-
-1. 设置反向代理（如 Nginx）并启用 HTTPS
-2. 实现适当的认证机制
-3. 限制 API 的访问范围
-
-请避免在公共网络上暴露含有密钥参数的 API 调用。
