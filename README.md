@@ -17,6 +17,7 @@
 - [一体化工作流](#一体化工作流)
 - [完整工作流示例](#完整工作流示例)
 - [常见问题](#常见问题)
+- [API 服务](#api-服务)
 
 ## 安装
 
@@ -229,3 +230,106 @@ python main.py "https://example.com/interview.mp3" --keep-tags -l en
 ### 5. 文件过大处理失败
 
 阿里云语音识别API对文件大小有限制（通常为2GB以内）。对于大型文件，可能需要先分割后再处理。
+
+## API 服务
+
+本工具集同时提供了 API 服务接口，可以通过 HTTP 请求使用所有功能。
+
+### 启动 API 服务
+
+```bash
+# 直接启动服务
+python api.py
+
+# 或者使用 uvicorn 启动（支持热重载）
+uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### API 文档
+
+服务启动后，可以访问自动生成的 API 文档：
+
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+### API 端点概览
+
+| 端点 | 方法 | 描述 |
+|------|------|------|
+| `/` | GET | 返回 API 基本信息 |
+| `/download` | POST | 下载音频文件 |
+| `/upload` | POST | 上传文件到七牛云 |
+| `/recognize` | POST | 识别音频文件内容 |
+| `/process` | POST | 执行完整工作流 |
+| `/text` | GET | 执行工作流并只返回纯文本结果 |
+
+### API 使用示例
+
+#### 示例 1: 基本文本识别
+
+使用 `/text` 端点可以快速获取音频内容的纯文本识别结果：
+
+```bash
+curl -X GET "http://localhost:8000/text?url=https://example.com/abcd"
+```
+
+#### 示例 2: 带 API 密钥的完整请求
+
+完整的 cURL 示例，包含所有密钥和选项：
+
+```bash
+curl -X POST "http://localhost:8000/process" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/abcd",
+    "language": "auto",
+    "keep_tags": false,
+    "link_expires": 7200,
+    "verbose": false,
+    "cleanup": true,
+    "qiniu_access_key": "您的七牛云AccessKey",
+    "qiniu_secret_key": "您的七牛云SecretKey",
+    "qiniu_bucket_name": "您的存储空间名称",
+    "qiniu_bucket_domain": "您的存储空间域名",
+    "aliyun_api_key": "您的阿里云API密钥"
+  }'
+```
+
+#### 示例 3: 仅下载音频
+
+```bash
+curl -X POST "http://localhost:8000/download" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "verbose": true
+  }'
+```
+
+#### 示例 4: 仅执行语音识别
+
+```bash
+curl -X POST "http://localhost:8000/recognize" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "file_url": "https://example.com/abcd",
+    "language": "en", 
+    "api_key": "您的阿里云API密钥",
+    "keep_tags": true
+  }'
+```
+
+### API 返回格式
+
+- `/text` 端点直接返回纯文本
+- 其他端点返回 JSON 格式的详细结果
+
+### API 安全注意事项
+
+API 服务默认没有启用认证机制。在生产环境中部署时，建议：
+
+1. 设置反向代理（如 Nginx）并启用 HTTPS
+2. 实现适当的认证机制
+3. 限制 API 的访问范围
+
+请避免在公共网络上暴露含有密钥参数的 API 调用。

@@ -12,3 +12,8 @@ yt-dlp>=2023.7.6
 
 # 命令行交互增强
 tqdm>=4.65.0 
+
+# API服务相关
+fastapi>=0.103.1
+uvicorn>=0.23.2
+pydantic>=2.3.0
