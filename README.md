@@ -209,6 +209,25 @@ python main.py "https://example.com/podcast.mp3" -l zh -v -s result.json
 python main.py "https://example.com/interview.mp3" --keep-tags -l en
 ```
 
+### 示例 5: 使用 POST 方法获取纯文本结果（带 API 密钥）
+
+通过 POST 请求 `/text` 端点，支持传入 API 密钥，并只返回识别后的纯文本：
+
+```bash
+curl -X POST "http://localhost:8000/text" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/abcd",
+    "qiniu_access_key": "您的七牛云AccessKey",
+    "qiniu_secret_key": "您的七牛云SecretKey",
+    "qiniu_bucket_name": "您的存储空间名称",
+    "qiniu_bucket_domain": "您的存储空间域名",
+    "aliyun_api_key": "您的阿里云API密钥"
+  }'
+```
+
+与 GET 请求不同，POST 请求支持传入各种 API 密钥，不需要依赖配置文件。
+
 ## 常见问题
 
 ### 1. 上传到七牛云后无法访问文件
