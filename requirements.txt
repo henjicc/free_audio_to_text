@@ -1,0 +1,14 @@
+# 七牛云存储SDK
+qiniu>=7.9.0
+
+# 阿里云DashScope SDK
+dashscope>=1.13.0
+
+# HTTP请求库
+requests>=2.28.0
+
+# 音频下载工具
+yt-dlp>=2023.7.6
+
+# 命令行交互增强
+tqdm>=4.65.0 
