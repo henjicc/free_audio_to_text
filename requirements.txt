@@ -17,3 +17,6 @@ tqdm>=4.65.0
 fastapi>=0.103.1
 uvicorn>=0.23.2
 pydantic>=2.3.0
+
+# 环境变量支持
+python-dotenv>=1.0.0

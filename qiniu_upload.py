@@ -11,16 +11,13 @@ import sys
 import time
 from qiniu import Auth, put_file, etag
 import qiniu.config
+from dotenv import load_dotenv
 
-# 尝试导入配置文件
-try:
-    import config
-    config_exists = True
-except ImportError:
-    config_exists = False
+# 加载环境变量
+load_dotenv()
 
 class QiniuUploader:
-    def __init__(self, access_key, secret_key, bucket_name, bucket_domain):
+    def __init__(self, access_key=None, secret_key=None, bucket_name=None, bucket_domain=None):
         """
         初始化上传器
         
@@ -30,12 +27,18 @@ class QiniuUploader:
             bucket_name: 存储空间名称
             bucket_domain: 存储空间绑定的域名(不含http://)
         """
-        self.access_key = access_key
-        self.secret_key = secret_key
-        self.bucket_name = bucket_name
-        self.bucket_domain = bucket_domain
+        # 获取配置(优先级：参数 > 环境变量)
+        self.access_key = access_key or os.environ.get("QINIU_ACCESS_KEY")
+        self.secret_key = secret_key or os.environ.get("QINIU_SECRET_KEY")
+        self.bucket_name = bucket_name or os.environ.get("QINIU_BUCKET_NAME")
+        self.bucket_domain = bucket_domain or os.environ.get("QINIU_BUCKET_DOMAIN")
+            
+        # 验证配置完整性
+        if not all([self.access_key, self.secret_key, self.bucket_name, self.bucket_domain]):
+            raise ValueError("七牛云配置不完整，请通过参数提供或设置环境变量")
+        
         # 构建鉴权对象
-        self.q = Auth(access_key, secret_key)
+        self.q = Auth(self.access_key, self.secret_key)
     
     def get_upload_token(self, key=None, expires=3600):
         """
@@ -129,33 +132,22 @@ def main():
     remote_name = sys.argv[2] if len(sys.argv) > 2 else None
     expires = int(sys.argv[3]) if len(sys.argv) > 3 else 3600  # 默认有效期1小时
     
-    # 获取七牛云配置
-    if config_exists:
-        # 从配置文件读取
-        access_key = config.QINIU_ACCESS_KEY
-        secret_key = config.QINIU_SECRET_KEY
-        bucket_name = config.QINIU_BUCKET_NAME
-        bucket_domain = config.QINIU_BUCKET_DOMAIN
-    else:
-        # 从环境变量读取(作为备选)
-        access_key = os.environ.get("QINIU_ACCESS_KEY", "")
-        secret_key = os.environ.get("QINIU_SECRET_KEY", "")
-        bucket_name = os.environ.get("QINIU_BUCKET_NAME", "")
-        bucket_domain = os.environ.get("QINIU_BUCKET_DOMAIN", "")
+    # 从环境变量获取配置
+    access_key = os.environ.get("QINIU_ACCESS_KEY", "")
+    secret_key = os.environ.get("QINIU_SECRET_KEY", "")
+    bucket_name = os.environ.get("QINIU_BUCKET_NAME", "")
+    bucket_domain = os.environ.get("QINIU_BUCKET_DOMAIN", "")
     
     # 检查配置是否完整
     if not all([access_key, secret_key, bucket_name, bucket_domain]):
-        if not config_exists:
-            print("❌ 错误: 未找到config.py配置文件")
-            print("请创建config.py文件并填写七牛云账号信息，参考格式如下:")
-            print("-" * 50)
-            print('QINIU_ACCESS_KEY = "您的Access Key"')
-            print('QINIU_SECRET_KEY = "您的Secret Key"')
-            print('QINIU_BUCKET_NAME = "您的存储空间名称"')
-            print('QINIU_BUCKET_DOMAIN = "您的存储空间域名"')
-            print("-" * 50)
-        else:
-            print("❌ 错误: 配置信息不完整，请在config.py中填写所有必要的信息")
+        print("❌ 错误: 配置信息不完整")
+        print("请设置必要的环境变量或创建.env文件，参考格式如下:")
+        print("-" * 50)
+        print('QINIU_ACCESS_KEY=您的Access Key')
+        print('QINIU_SECRET_KEY=您的Secret Key')
+        print('QINIU_BUCKET_NAME=您的存储空间名称')
+        print('QINIU_BUCKET_DOMAIN=您的存储空间域名')
+        print("-" * 50)
         return
     
     # 创建上传器

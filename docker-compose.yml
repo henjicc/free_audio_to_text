@@ -1,15 +1,13 @@
 version: '3'
 
 services:
-  free_audio_to_text:
+  audio-api:
     build: .
-    container_name: free_audio_to_text
-    restart: unless-stopped
     ports:
-      - "8635:8000"
+      - "8000:8000"
     volumes:
-      - ./config:/app/config
       - ./logs:/app/logs
       - ./downloads_temp:/app/downloads_temp
-    environment:
-      - TZ=Asia/Shanghai 
+    env_file:
+      - .env
+    restart: unless-stopped 

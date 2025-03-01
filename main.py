@@ -12,19 +12,16 @@ import argparse
 import tempfile
 import shutil  # 用于删除目录
 from typing import Dict, Any, Tuple, Optional
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 # 导入功能模块
 from download_audio import download_audio
 from qiniu_upload import QiniuUploader
 from aliyun_speech_recognition import AliyunSpeechRecognition
 from qiniu import BucketManager, Auth  # 添加BucketManager用于删除云端文件
-
-# 尝试导入配置文件
-try:
-    import config
-    config_exists = True
-except ImportError:
-    config_exists = False
 
 def process_audio(
     url: str, 
@@ -34,7 +31,13 @@ def process_audio(
     link_expires: int = 3600,
     verbose: bool = False,
     save_json: Optional[str] = None,
-    cleanup: bool = False  # 新增清理参数
+    cleanup: bool = False,
+    # 参数用于覆盖环境变量
+    qiniu_access_key: Optional[str] = None,
+    qiniu_secret_key: Optional[str] = None,
+    qiniu_bucket_name: Optional[str] = None,
+    qiniu_bucket_domain: Optional[str] = None,
+    aliyun_api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     完整的音频处理工作流：下载 -> 上传 -> 识别 -> 清理
@@ -48,6 +51,11 @@ def process_audio(
         verbose: 是否显示详细信息
         save_json: 保存识别结果的JSON文件路径
         cleanup: 处理完成后是否清理临时文件和云端文件
+        qiniu_access_key: 七牛云访问密钥
+        qiniu_secret_key: 七牛云密钥
+        qiniu_bucket_name: 七牛云存储桶名称
+        qiniu_bucket_domain: 七牛云存储桶域名
+        aliyun_api_key: 阿里云API密钥
         
     返回:
         处理结果字典
@@ -94,44 +102,39 @@ def process_audio(
         print("\n🔄 步骤2: 上传到七牛云...")
     
     try:
-        # 获取七牛云配置
-        if config_exists:
-            access_key = config.QINIU_ACCESS_KEY
-            secret_key = config.QINIU_SECRET_KEY
-            bucket_name = config.QINIU_BUCKET_NAME
-            bucket_domain = config.QINIU_BUCKET_DOMAIN
-            
-            # 检查配置是否完整
-            if not all([access_key, secret_key, bucket_name, bucket_domain]):
-                result["error"] = "七牛云配置不完整，请检查config.py文件"
-                return result
-                
-            # 创建上传器
-            uploader = QiniuUploader(access_key, secret_key, bucket_name, bucket_domain)
-            
-            # 上传文件
-            upload_success, upload_result = uploader.upload_file(audio_file, None, link_expires)
-            
-            if not upload_success:
-                result["error"] = f"上传到七牛云失败: {upload_result}"
-                return result
-                
-            result["steps_completed"].append("upload")
-            result["upload_result"] = upload_result
-            result["download_url"] = upload_result["direct_link"]
-            
-            # 保存文件标识用于后续删除
-            cloud_file_key = upload_result["file_key"]
-            result["cloud_file_key"] = cloud_file_key
-            
-            if verbose:
-                print(f"✅ 文件上传成功")
-                print(f"📋 下载链接: {upload_result['direct_link']}")
-                print(f"⏱️ 链接有效期: {upload_result['expires']} 秒")
-        else:
-            result["error"] = "未找到config.py配置文件，无法上传到七牛云"
+        # 获取七牛云配置(优先级：参数 > 环境变量)
+        access_key = qiniu_access_key or os.environ.get("QINIU_ACCESS_KEY")
+        secret_key = qiniu_secret_key or os.environ.get("QINIU_SECRET_KEY") 
+        bucket_name = qiniu_bucket_name or os.environ.get("QINIU_BUCKET_NAME")
+        bucket_domain = qiniu_bucket_domain or os.environ.get("QINIU_BUCKET_DOMAIN")
+        
+        # 检查配置是否完整
+        if not all([access_key, secret_key, bucket_name, bucket_domain]):
+            result["error"] = "七牛云配置不完整，请设置环境变量或通过参数提供配置"
             return result
             
+        # 创建上传器
+        uploader = QiniuUploader(access_key, secret_key, bucket_name, bucket_domain)
+        
+        # 上传文件
+        upload_success, upload_result = uploader.upload_file(audio_file, None, link_expires)
+        
+        if not upload_success:
+            result["error"] = f"上传到七牛云失败: {upload_result}"
+            return result
+            
+        result["steps_completed"].append("upload")
+        result["upload_result"] = upload_result
+        result["download_url"] = upload_result["direct_link"]
+        
+        # 保存文件标识用于后续删除
+        cloud_file_key = upload_result["file_key"]
+        result["cloud_file_key"] = cloud_file_key
+        
+        if verbose:
+            print(f"✅ 文件上传成功")
+            print(f"📋 下载链接: {upload_result['direct_link']}")
+            print(f"⏱️ 链接有效期: {upload_result['expires']} 秒")
     except Exception as e:
         result["error"] = f"上传到七牛云过程出错: {str(e)}"
         return result

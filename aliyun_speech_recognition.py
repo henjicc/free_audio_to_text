@@ -14,13 +14,10 @@ import requests
 import re
 from http import HTTPStatus
 from typing import List, Optional, Dict, Any
+from dotenv import load_dotenv
 
-# 尝试导入配置文件
-try:
-    import config
-    config_exists = True
-except ImportError:
-    config_exists = False
+# 加载环境变量
+load_dotenv()
 
 # 导入DashScope SDK
 try:
@@ -39,18 +36,17 @@ class AliyunSpeechRecognition:
         初始化语音识别工具
         
         参数:
-            api_key: 阿里云API密钥，不提供则从配置文件或环境变量获取
+            api_key: 阿里云API密钥，不提供则从环境变量获取
             remove_tags: 是否移除情感和音频事件标记，默认为True
         """
+        # 获取API密钥(优先级：参数 > 环境变量)
+        self.api_key = api_key or os.environ.get("DASHSCOPE_API_KEY")
+            
+        if not self.api_key:
+            raise ValueError("缺少阿里云API密钥，请在参数中提供或设置DASHSCOPE_API_KEY环境变量")
+        
         # 设置API密钥
-        if api_key:
-            dashscope.api_key = api_key
-        elif config_exists and hasattr(config, 'ALIYUN_API_KEY') and config.ALIYUN_API_KEY:
-            dashscope.api_key = config.ALIYUN_API_KEY
-        elif 'DASHSCOPE_API_KEY' in os.environ:
-            pass  # SDK会自动从环境变量读取
-        else:
-            print("⚠️ 警告: 未设置API密钥，请在config.py中配置ALIYUN_API_KEY或设置DASHSCOPE_API_KEY环境变量")
+        dashscope.api_key = self.api_key
         
         # 是否移除标记
         self.remove_tags = remove_tags

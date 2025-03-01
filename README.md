@@ -36,25 +36,35 @@ pip install -r requirements.txt
 
 ## 配置
 
-所有API密钥和服务配置统一保存在`config.py`文件中。
+本工具使用环境变量进行配置，推荐使用.env文件管理敏感配置信息。
 
-### 七牛云配置
+### 基本配置步骤
 
-在`config.py`中填写七牛云账号信息：
-```python
+1. 复制 `.env.example` 文件为 `.env`
+2. 编辑 `.env` 文件，填写相关配置信息
+
+```
 # 七牛云配置
-QINIU_ACCESS_KEY = "您的七牛云Access Key"
-QINIU_SECRET_KEY = "您的七牛云Secret Key"
-QINIU_BUCKET_NAME = "您的存储空间名称"
-QINIU_BUCKET_DOMAIN = "您的存储空间域名"
+QINIU_ACCESS_KEY=您的七牛云Access Key
+QINIU_SECRET_KEY=您的七牛云Secret Key
+QINIU_BUCKET_NAME=您的存储空间名称
+QINIU_BUCKET_DOMAIN=您的存储空间域名
+
+# 阿里云配置
+DASHSCOPE_API_KEY=您的阿里云DashScope API密钥
+
+# API服务配置(可选)
+API_HOST=0.0.0.0
+API_PORT=8000
+LOG_LEVEL=INFO
 ```
 
-### 阿里云配置
+### 验证配置
 
-在`config.py`中填写阿里云DashScope API密钥：
-```python
-# 阿里云配置
-ALIYUN_API_KEY = "您的阿里云DashScope API密钥"
+配置完成后，运行检查脚本确认环境变量是否正确设置：
+
+```bash
+python check_env.py
 ```
 
 ## 音频下载
@@ -208,25 +218,6 @@ python main.py "https://example.com/podcast.mp3" -l zh -v -s result.json
 ```bash
 python main.py "https://example.com/interview.mp3" --keep-tags -l en
 ```
-
-### 示例 5: 使用 POST 方法获取纯文本结果（带 API 密钥）
-
-通过 POST 请求 `/text` 端点，支持传入 API 密钥，并只返回识别后的纯文本：
-
-```bash
-curl -X POST "http://localhost:8000/text" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://example.com/abcd",
-    "qiniu_access_key": "您的七牛云AccessKey",
-    "qiniu_secret_key": "您的七牛云SecretKey",
-    "qiniu_bucket_name": "您的存储空间名称",
-    "qiniu_bucket_domain": "您的存储空间域名",
-    "aliyun_api_key": "您的阿里云API密钥"
-  }'
-```
-
-与 GET 请求不同，POST 请求支持传入各种 API 密钥，不需要依赖配置文件。
 
 ## 常见问题
 

@@ -15,12 +15,21 @@ from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler  # 添加导入
 from typing import Optional, Dict, Any
 from pathlib import Path
+from dotenv import load_dotenv  # 新增导入
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl, Field
+
+# 加载.env文件中的环境变量
+load_dotenv()
+
+# 配置日志级别从环境变量获取
+log_level_str = os.environ.get("LOG_LEVEL", "INFO")
+log_level = getattr(logging, log_level_str)
 
 # 配置日志系统 - 使用轮转日志处理器
 # 创建日志目录
@@ -48,7 +57,7 @@ console_handler.setFormatter(log_format)
 
 # 创建日志记录器
 logger = logging.getLogger("audio-api")
-logger.setLevel(logging.INFO)
+logger.setLevel(log_level)  # 使用环境变量中的日志级别
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
@@ -64,11 +73,41 @@ from qiniu_upload import QiniuUploader
 from aliyun_speech_recognition import AliyunSpeechRecognition
 from main import process_audio
 
+# 添加生命周期上下文管理器
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时执行 - 替代原来的 startup_event
+    required_env_vars = [
+        ("QINIU_ACCESS_KEY", "七牛云Access Key"),
+        ("QINIU_SECRET_KEY", "七牛云Secret Key"),
+        ("QINIU_BUCKET_NAME", "七牛云存储空间名称"),
+        ("QINIU_BUCKET_DOMAIN", "七牛云存储空间域名"),
+        ("DASHSCOPE_API_KEY", "阿里云DashScope API密钥")
+    ]
+    
+    missing_vars = []
+    
+    for var_name, var_desc in required_env_vars:
+        if not os.environ.get(var_name):
+            missing_vars.append(f"{var_desc} ({var_name})")
+    
+    if missing_vars:
+        logger.warning("⚠️ 缺少以下环境变量配置:")
+        for missing in missing_vars:
+            logger.warning(f"  - {missing}")
+        logger.warning("请在.env文件中设置这些变量，或在API请求中提供它们")
+        
+    yield  # 这里是应用运行期间
+    
+    # 关闭时执行的代码 (如有需要)
+    pass
+
 # 创建 FastAPI 应用
 app = FastAPI(
     title="音频处理与语音识别 API",
     description="提供音频下载、上传和语音识别功能的 API 服务",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan  # 添加这一行
 )
 
 # 添加 CORS 中间件
@@ -163,18 +202,6 @@ class ProcessRequest(BaseModel):
     qiniu_bucket_domain: Optional[str] = Field(None, description="存储空间域名")
     aliyun_api_key: Optional[str] = Field(None, description="阿里云 API 密钥")
 
-# 添加一个新的请求模型用于 /text 端点
-class TextRequest(BaseModel):
-    url: HttpUrl = Field(..., description="要处理的音频URL")
-    language: str = Field("auto", description="语音识别的语言代码，默认为auto自动检测")
-    keep_tags: bool = Field(False, description="是否保留情感和音频事件标记")
-    cleanup: bool = Field(True, description="处理完成后是否清理临时文件和云端文件")
-    qiniu_access_key: Optional[str] = Field(None, description="七牛云 Access Key")
-    qiniu_secret_key: Optional[str] = Field(None, description="七牛云 Secret Key")
-    qiniu_bucket_name: Optional[str] = Field(None, description="存储空间名称")
-    qiniu_bucket_domain: Optional[str] = Field(None, description="存储空间域名")
-    aliyun_api_key: Optional[str] = Field(None, description="阿里云 API 密钥")
-
 # API 路由
 @app.get("/")
 async def root():
@@ -219,24 +246,10 @@ async def api_upload(request: UploadRequest):
     logger.info(f"上传文件请求: {request.file_path}")
     
     # 获取七牛云配置
-    access_key = request.access_key
-    secret_key = request.secret_key
-    bucket_name = request.bucket_name
-    bucket_domain = request.bucket_domain
-    
-    # 如果未提供 API 密钥，尝试从配置文件获取
-    if not all([access_key, secret_key, bucket_name, bucket_domain]):
-        try:
-            import config
-            access_key = access_key or config.QINIU_ACCESS_KEY
-            secret_key = secret_key or config.QINIU_SECRET_KEY
-            bucket_name = bucket_name or config.QINIU_BUCKET_NAME
-            bucket_domain = bucket_domain or config.QINIU_BUCKET_DOMAIN
-        except (ImportError, AttributeError):
-            raise HTTPException(
-                status_code=400, 
-                detail="未提供七牛云配置，且无法从配置文件获取"
-            )
+    access_key = request.access_key or os.environ.get("QINIU_ACCESS_KEY")
+    secret_key = request.secret_key or os.environ.get("QINIU_SECRET_KEY")
+    bucket_name = request.bucket_name or os.environ.get("QINIU_BUCKET_NAME")
+    bucket_domain = request.bucket_domain or os.environ.get("QINIU_BUCKET_DOMAIN")
     
     # 检查文件是否存在
     if not os.path.exists(request.file_path):
@@ -347,13 +360,13 @@ async def api_process(request: ProcessRequest, background_tasks: BackgroundTasks
         raise HTTPException(status_code=500, detail=f"处理过程发生异常: {str(e)}")
 
 @app.get("/text")
-async def api_text_get(
+async def api_text(
     url: str = Query(..., description="要处理的音频URL"),
     language: str = Query("auto", description="语音识别的语言代码"),
     keep_tags: bool = Query(False, description="是否保留情感和音频事件标记")
 ):
-    """执行完整工作流并只返回纯文本结果 (GET 方法)"""
-    logger.info(f"文本识别请求(GET): {url}, 语言: {language}")
+    """执行完整工作流并只返回纯文本结果"""
+    logger.info(f"文本识别请求: {url}, 语言: {language}")
     
     try:
         logger.info("开始执行文本识别工作流")
@@ -372,137 +385,6 @@ async def api_text_get(
         logger.info(f"文本识别成功: 文本长度 {len(result['text'])}")
         # 返回纯文本结果
         return PlainTextResponse(result["text"])
-    except Exception as e:
-        logger.exception(f"文本识别过程发生异常: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"文本识别过程发生异常: {str(e)}")
-
-# 修改 process_audio 函数，使其接受额外的密钥参数
-@app.post("/text")
-async def api_text_post(request: TextRequest):
-    """执行完整工作流并只返回纯文本结果 (POST 方法，支持传入 API 密钥)"""
-    logger.info(f"文本识别请求(POST): {str(request.url)}, 语言: {request.language}")
-    
-    # 创建一个字典来存储所有密钥
-    credentials = {}
-    
-    # 收集所有提供的密钥
-    if request.qiniu_access_key:
-        logger.info(f"收到七牛云 Access Key: {request.qiniu_access_key[:3]}...{request.qiniu_access_key[-3:]}")
-        credentials["qiniu_access_key"] = request.qiniu_access_key
-        
-    if request.qiniu_secret_key:
-        logger.info(f"收到七牛云 Secret Key: {request.qiniu_secret_key[:3]}...{request.qiniu_secret_key[-3:]}")
-        credentials["qiniu_secret_key"] = request.qiniu_secret_key
-        
-    if request.qiniu_bucket_name:
-        logger.info(f"收到七牛云 Bucket: {request.qiniu_bucket_name}")
-        credentials["qiniu_bucket_name"] = request.qiniu_bucket_name
-        
-    if request.qiniu_bucket_domain:
-        logger.info(f"收到七牛云域名: {request.qiniu_bucket_domain}")
-        credentials["qiniu_bucket_domain"] = request.qiniu_bucket_domain
-        
-    if request.aliyun_api_key:
-        logger.info(f"收到阿里云 API Key: {request.aliyun_api_key[:3]}...{request.aliyun_api_key[-3:]}")
-        credentials["aliyun_api_key"] = request.aliyun_api_key
-    
-    # 修改 main.py 中的 process_audio 函数，使其接受 credentials 参数
-    try:
-        # 重新定义 process_audio 函数
-        def process_audio_with_credentials(url, language="auto", keep_tags=False, cleanup=True, verbose=True):
-            """
-            包装 process_audio 函数，添加凭证处理
-            """
-            logger.info("使用修改版 process_audio 函数，直接传递密钥...")
-            
-            # 创建临时目录用于下载文件
-            output_dir = os.path.join(os.getcwd(), "downloads_temp")
-            os.makedirs(output_dir, exist_ok=True)
-            
-            # 步骤1: 下载音频
-            logger.info("步骤1: 下载音频...")
-            success, local_file = download_audio(url, output_dir, verbose)
-            if not success:
-                return {"success": False, "steps_completed": [], "error": "下载音频失败"}
-                
-            # 步骤2: 上传到七牛云
-            logger.info("步骤2: 上传到七牛云...")
-            try:
-                # 使用传入的密钥初始化上传器
-                uploader = QiniuUploader(
-                    access_key=credentials.get("qiniu_access_key"),
-                    secret_key=credentials.get("qiniu_secret_key"),
-                    bucket_name=credentials.get("qiniu_bucket_name"),
-                    bucket_domain=credentials.get("qiniu_bucket_domain")
-                )
-                
-                success, upload_result = uploader.upload_file(local_file)
-                if not success:
-                    return {"success": False, "steps_completed": ["下载音频"], "error": f"上传到七牛云失败: {upload_result}"}
-                
-                file_url = upload_result.get("url")
-                
-                # 步骤3: 识别音频内容
-                logger.info("步骤3: 识别音频内容...")
-                recognizer = AliyunSpeechRecognition(
-                    api_key=credentials.get("aliyun_api_key"),
-                    remove_tags=not keep_tags
-                )
-                
-                result = recognizer.recognize_file(file_url, language, verbose)
-                if "error" in result:
-                    return {"success": False, "steps_completed": ["下载音频", "上传到七牛云"], "error": f"语音识别失败: {result['error']}"}
-                
-                # 处理识别结果
-                final_result = {
-                    "success": True,
-                    "steps_completed": ["下载音频", "上传到七牛云", "语音识别"],
-                    "text": result.get("text", ""),
-                    "original_text": result.get("original_text", ""),
-                    "language": result.get("language", language),
-                    "duration": result.get("duration", 0),
-                    "audio_url": file_url
-                }
-                
-                # 步骤4: 清理文件
-                if cleanup:
-                    logger.info("步骤4: 清理文件...")
-                    # 清理本地文件
-                    if os.path.exists(local_file):
-                        os.remove(local_file)
-                        logger.info(f"已删除本地文件: {local_file}")
-                    
-                    # 清理云端文件
-                    try:
-                        uploader.delete_file(upload_result.get("key"))
-                        logger.info(f"已删除云端文件: {upload_result.get('key')}")
-                        final_result["steps_completed"].append("清理文件")
-                    except Exception as e:
-                        logger.warning(f"清理云端文件失败: {str(e)}")
-                
-                return final_result
-                
-            except Exception as e:
-                logger.exception(f"处理过程发生异常: {str(e)}")
-                return {"success": False, "steps_completed": ["下载音频"], "error": f"处理过程发生异常: {str(e)}"}
-        
-        # 调用修改后的函数
-        logger.info("开始执行自定义文本识别工作流")
-        result = process_audio_with_credentials(
-            url=str(request.url),
-            language=request.language,
-            keep_tags=request.keep_tags,
-            cleanup=request.cleanup,
-            verbose=True
-        )
-    
-        if not result["success"]:
-            logger.error(f"文本识别失败: {result['error']}")
-            raise HTTPException(status_code=500, detail=result["error"])
-    
-        logger.info(f"文本识别成功: 文本长度 {len(result.get('text', ''))}")
-        # 返回纯文本结果
-        return PlainTextResponse(result.get("text", ""))
     except Exception as e:
         logger.exception(f"文本识别过程发生异常: {str(e)}")
         raise HTTPException(status_code=500, detail=f"文本识别过程发生异常: {str(e)}")
