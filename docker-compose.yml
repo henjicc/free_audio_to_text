@@ -1,9 +1,9 @@
 version: '3'
 
 services:
-  audio-processor:
+  free_audio_to_text:
     build: .
-    container_name: audio-processor
+    container_name: free_audio_to_text
     restart: unless-stopped
     ports:
       - "8000:8000"
