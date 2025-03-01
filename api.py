@@ -376,46 +376,133 @@ async def api_text_get(
         logger.exception(f"文本识别过程发生异常: {str(e)}")
         raise HTTPException(status_code=500, detail=f"文本识别过程发生异常: {str(e)}")
 
-# 添加新的 POST 端点，支持传入 API 密钥
+# 修改 process_audio 函数，使其接受额外的密钥参数
 @app.post("/text")
 async def api_text_post(request: TextRequest):
     """执行完整工作流并只返回纯文本结果 (POST 方法，支持传入 API 密钥)"""
     logger.info(f"文本识别请求(POST): {str(request.url)}, 语言: {request.language}")
     
-    # 如果提供了API密钥，覆盖环境变量
-    if request.qiniu_access_key:
-        logger.info("使用请求提供的七牛云 Access Key")
-        os.environ["QINIU_ACCESS_KEY"] = request.qiniu_access_key
-    if request.qiniu_secret_key:
-        logger.info("使用请求提供的七牛云 Secret Key")
-        os.environ["QINIU_SECRET_KEY"] = request.qiniu_secret_key
-    if request.qiniu_bucket_name:
-        logger.info(f"使用请求提供的七牛云 Bucket: {request.qiniu_bucket_name}")
-        os.environ["QINIU_BUCKET_NAME"] = request.qiniu_bucket_name
-    if request.qiniu_bucket_domain:
-        logger.info(f"使用请求提供的七牛云域名: {request.qiniu_bucket_domain}")
-        os.environ["QINIU_BUCKET_DOMAIN"] = request.qiniu_bucket_domain
-    if request.aliyun_api_key:
-        logger.info("使用请求提供的阿里云 API Key")
-        os.environ["DASHSCOPE_API_KEY"] = request.aliyun_api_key
+    # 创建一个字典来存储所有密钥
+    credentials = {}
     
+    # 收集所有提供的密钥
+    if request.qiniu_access_key:
+        logger.info(f"收到七牛云 Access Key: {request.qiniu_access_key[:3]}...{request.qiniu_access_key[-3:]}")
+        credentials["qiniu_access_key"] = request.qiniu_access_key
+        
+    if request.qiniu_secret_key:
+        logger.info(f"收到七牛云 Secret Key: {request.qiniu_secret_key[:3]}...{request.qiniu_secret_key[-3:]}")
+        credentials["qiniu_secret_key"] = request.qiniu_secret_key
+        
+    if request.qiniu_bucket_name:
+        logger.info(f"收到七牛云 Bucket: {request.qiniu_bucket_name}")
+        credentials["qiniu_bucket_name"] = request.qiniu_bucket_name
+        
+    if request.qiniu_bucket_domain:
+        logger.info(f"收到七牛云域名: {request.qiniu_bucket_domain}")
+        credentials["qiniu_bucket_domain"] = request.qiniu_bucket_domain
+        
+    if request.aliyun_api_key:
+        logger.info(f"收到阿里云 API Key: {request.aliyun_api_key[:3]}...{request.aliyun_api_key[-3:]}")
+        credentials["aliyun_api_key"] = request.aliyun_api_key
+    
+    # 修改 main.py 中的 process_audio 函数，使其接受 credentials 参数
     try:
-        logger.info("开始执行文本识别工作流")
-        result = process_audio(
+        # 重新定义 process_audio 函数
+        def process_audio_with_credentials(url, language="auto", keep_tags=False, cleanup=True, verbose=True):
+            """
+            包装 process_audio 函数，添加凭证处理
+            """
+            logger.info("使用修改版 process_audio 函数，直接传递密钥...")
+            
+            # 创建临时目录用于下载文件
+            output_dir = os.path.join(os.getcwd(), "downloads_temp")
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # 步骤1: 下载音频
+            logger.info("步骤1: 下载音频...")
+            success, local_file = download_audio(url, output_dir, verbose)
+            if not success:
+                return {"success": False, "steps_completed": [], "error": "下载音频失败"}
+                
+            # 步骤2: 上传到七牛云
+            logger.info("步骤2: 上传到七牛云...")
+            try:
+                # 使用传入的密钥初始化上传器
+                uploader = QiniuUploader(
+                    access_key=credentials.get("qiniu_access_key"),
+                    secret_key=credentials.get("qiniu_secret_key"),
+                    bucket_name=credentials.get("qiniu_bucket_name"),
+                    bucket_domain=credentials.get("qiniu_bucket_domain")
+                )
+                
+                success, upload_result = uploader.upload_file(local_file)
+                if not success:
+                    return {"success": False, "steps_completed": ["下载音频"], "error": f"上传到七牛云失败: {upload_result}"}
+                
+                file_url = upload_result.get("url")
+                
+                # 步骤3: 识别音频内容
+                logger.info("步骤3: 识别音频内容...")
+                recognizer = AliyunSpeechRecognition(
+                    api_key=credentials.get("aliyun_api_key"),
+                    remove_tags=not keep_tags
+                )
+                
+                result = recognizer.recognize_file(file_url, language, verbose)
+                if "error" in result:
+                    return {"success": False, "steps_completed": ["下载音频", "上传到七牛云"], "error": f"语音识别失败: {result['error']}"}
+                
+                # 处理识别结果
+                final_result = {
+                    "success": True,
+                    "steps_completed": ["下载音频", "上传到七牛云", "语音识别"],
+                    "text": result.get("text", ""),
+                    "original_text": result.get("original_text", ""),
+                    "language": result.get("language", language),
+                    "duration": result.get("duration", 0),
+                    "audio_url": file_url
+                }
+                
+                # 步骤4: 清理文件
+                if cleanup:
+                    logger.info("步骤4: 清理文件...")
+                    # 清理本地文件
+                    if os.path.exists(local_file):
+                        os.remove(local_file)
+                        logger.info(f"已删除本地文件: {local_file}")
+                    
+                    # 清理云端文件
+                    try:
+                        uploader.delete_file(upload_result.get("key"))
+                        logger.info(f"已删除云端文件: {upload_result.get('key')}")
+                        final_result["steps_completed"].append("清理文件")
+                    except Exception as e:
+                        logger.warning(f"清理云端文件失败: {str(e)}")
+                
+                return final_result
+                
+            except Exception as e:
+                logger.exception(f"处理过程发生异常: {str(e)}")
+                return {"success": False, "steps_completed": ["下载音频"], "error": f"处理过程发生异常: {str(e)}"}
+        
+        # 调用修改后的函数
+        logger.info("开始执行自定义文本识别工作流")
+        result = process_audio_with_credentials(
             url=str(request.url),
             language=request.language,
             keep_tags=request.keep_tags,
             cleanup=request.cleanup,
-            verbose=True  # 修改为True，始终显示详细信息用于日志
+            verbose=True
         )
     
         if not result["success"]:
             logger.error(f"文本识别失败: {result['error']}")
             raise HTTPException(status_code=500, detail=result["error"])
     
-        logger.info(f"文本识别成功: 文本长度 {len(result['text'])}")
+        logger.info(f"文本识别成功: 文本长度 {len(result.get('text', ''))}")
         # 返回纯文本结果
-        return PlainTextResponse(result["text"])
+        return PlainTextResponse(result.get("text", ""))
     except Exception as e:
         logger.exception(f"文本识别过程发生异常: {str(e)}")
         raise HTTPException(status_code=500, detail=f"文本识别过程发生异常: {str(e)}")
