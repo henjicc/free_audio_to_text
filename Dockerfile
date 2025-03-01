@@ -26,7 +26,7 @@ EXPOSE 8000
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1
-ENV API_PORT=8000  # 强制容器内部使用8000端口
+ENV API_PORT=8000
 
 # 设置启动命令
 CMD ["python", "api.py"] 
